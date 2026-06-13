@@ -9,7 +9,7 @@ public static class SurfaceNormalResolver
         LayerMask mask,
         Vector3 previousNormal,
         float capsuleRadius,
-        Transform playerTransform) // Added playerTransform to sample local space axes
+        Transform playerTransform)
     {
         Vector3 upDirection = -gravityDir;
         Vector3 accumulatedNormal = Vector3.zero;
@@ -22,7 +22,7 @@ public static class SurfaceNormalResolver
             hitCount++;
         }
 
-        // 2. THE ULTIMATE POLE FIX: Sample the perimeter using Mario's local directions.
+        // 2. THE POLE FIX: Sample the perimeter using players local directions.
         // By relying on the player's live local right/forward components instead of global assets, 
         // the cross-products never experience inversion flips or collapses at the South Pole.
         float offsetDist = capsuleRadius * 0.7f;
@@ -36,6 +36,7 @@ public static class SurfaceNormalResolver
 
         Vector3[] offsets = new Vector3[]
         {
+            // remember not to touch, breaks camera with cinemachine
             localForward * offsetDist,   // Front
             -localForward * offsetDist,  // Back
             localRight * offsetDist,     // Right

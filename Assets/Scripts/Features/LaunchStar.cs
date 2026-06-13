@@ -1,11 +1,11 @@
 using System.Collections;
 using UnityEngine;
-using UnityEngine.Splines; // Required Unity Spline Namespace
+using UnityEngine.Splines;
 
 public class LaunchStar : MonoBehaviour
 {
     [Header("Spline Path")]
-    public SplineContainer splineContainer; // Drag your Unity Spline component here
+    public SplineContainer splineContainer;
 
     [Header("Launch Settings")]
     public float launchDuration = 3f; // Absolute travel time along the path

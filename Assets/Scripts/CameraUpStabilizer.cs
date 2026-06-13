@@ -37,7 +37,7 @@ public class CameraUpStabilizer : MonoBehaviour
         // 1. Calculate the raw, absolute vertical normal vector pointing straight away from the planet's core
         Vector3 rawPlanetaryUp = (playerTransform.position - planet.transform.position).normalized;
 
-        // 2. THE CHOTIC SNAP FIX: Smoothly blend our tracking vector over time using Slerp.
+        // 2. HOTSNAP FIX Smoothly blend our tracking vector over time using Slerp.
         // Instead of hard-snapping when crossing into a new gravity bubble mid-air, 
         // the camera's reference horizon plane will glide gracefully toward the new axis!
         smoothedPlanetaryUp = Vector3.Slerp(smoothedPlanetaryUp, rawPlanetaryUp, gravityRotationSmooth * Time.fixedDeltaTime).normalized;

@@ -1,12 +1,5 @@
 fileFormatVersion: 2
-guid: 780f5ab9acbcfc14db9bc7d21dabf3e1
-AssetOrigin:
-  serializedVersion: 1
-  productId: 332098
-  packageName: Seamless Grass Pattern Textures
-  packageVersion: 1.0.0
-  assetPath: Assets/Seamless Grass Pattern Textures/Textures/Grass Pattern I (Diffuse).png
-  uploadId: 785864
+guid: 38884ee55440d244aa8f6e69171e8890
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}

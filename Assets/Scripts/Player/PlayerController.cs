@@ -1,5 +1,4 @@
 ﻿using Animancer;
-using Unity.Cinemachine;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -41,7 +40,7 @@ public class PlayerController : MonoBehaviour
     public AnimationClip sprintClip;
     public AnimationClip jumpClip;
     [Tooltip("The animation that plays while riding a Launch Star spline track.")]
-    public AnimationClip flyClip; // Added Flight Animation Clip Reference
+    public AnimationClip flyClip;
 
     private Rigidbody rb;
     private Vector3 surfaceNormal = Vector3.up;
@@ -66,7 +65,7 @@ public class PlayerController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
 
-        // Set secure dynamic physics configurations
+        // Set secure dynamic physics configurations incase of forgetfulness
         rb.useGravity = false;
         rb.constraints = RigidbodyConstraints.FreezeRotation;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
@@ -125,7 +124,7 @@ public class PlayerController : MonoBehaviour
         );
 
         // ---------------------------------------------------------------------
-        // 2 & 3. SMOOTH GEOMETRY CORNER INTERPOLATION (No Jagged Snaps)
+        // 2 & 3. SMOOTH GEOMETRY CORNER INTERPOLATION
         // ---------------------------------------------------------------------
         Vector3 coreUp = -gravityDir;
         Vector3 targetPlayerUp = Vector3.Slerp(coreUp, surfaceNormal, 0.3f).normalized;
@@ -180,7 +179,7 @@ public class PlayerController : MonoBehaviour
             }
             else
             {
-                // CRITICAL CUBE GLUE FORCE: 
+                // CUBE GLUE FORCE: 
                 // Increase clamping slightly if running on flat box walls to fight linear speed drift
                 verticalVel = (planet.gravityShape == GravityShape.Box) ? -2.5f : -1f;
             }
