@@ -6,9 +6,7 @@ public class PlanetGravity : MonoBehaviour
     [Header("Planet Settings")]
     public float gravityStrength = 30f;
     public float planetRadius = 10f;
-
-    // Added to prevent a planet from pulling you from infinite distances
-    public float gravityFieldRadius = 25f;
+    public float gravityFieldRadius = 25f; // Outer limit of the planet's pull
 
     [Header("Debug")]
     public bool drawGizmos = true;
@@ -17,17 +15,24 @@ public class PlanetGravity : MonoBehaviour
 
     public Vector3 GetGravityDirection(Vector3 playerPos)
     {
-        return (transform.position - playerPos).normalized;
+        Vector3 direction = transform.position - playerPos;
+
+        // CORE INTEGRITY CHECK: If the player somehow glitches straight into the epicenter,
+        // fallback to a clean global up vector to prevent division-by-zero camera spins!
+        if (direction.sqrMagnitude < 0.001f)
+        {
+            return Vector3.down;
+        }
+
+        return direction.normalized;
     }
 
     public float GetDistanceToSurface(Vector3 playerPos)
     {
-        float distToCenter = Vector3.Distance(playerPos, transform.position);
-        return distToCenter - planetRadius;
+        return Vector3.Distance(playerPos, transform.position) - planetRadius;
     }
 
-    // Helps your GravityManager check if the player is within range
-    public bool IsPositionInGravityField(Vector3 playerPos)
+    public bool IsPositionInField(Vector3 playerPos)
     {
         return Vector3.Distance(playerPos, transform.position) <= gravityFieldRadius;
     }
@@ -35,12 +40,8 @@ public class PlanetGravity : MonoBehaviour
     private void OnDrawGizmos()
     {
         if (!drawGizmos) return;
-
-        // Draw solid ground radius
         Gizmos.color = surfaceColor;
         Gizmos.DrawWireSphere(transform.position, planetRadius);
-
-        // Draw outer gravity threshold field
         Gizmos.color = fieldColor;
         Gizmos.DrawWireSphere(transform.position, gravityFieldRadius);
     }

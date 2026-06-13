@@ -1,29 +1,53 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class GravityManager : MonoBehaviour
 {
-    private static PlanetGravity[] _planets;
+    private static GravityManager instance;
+    private List<PlanetGravity> activePlanets = new List<PlanetGravity>();
 
-    private void Awake()
+    void Awake()
     {
-        _planets = FindObjectsOfType<PlanetGravity>();
+        instance = this;
+        // Automatically find every planet inside your level hierarchy
+        activePlanets.AddRange(FindObjectsByType<PlanetGravity>(FindObjectsSortMode.None));
     }
 
-    public static PlanetGravity GetNearestPlanet(Vector3 playerPos)
+    public static PlanetGravity GetNearestPlanet(Vector3 playerPosition)
     {
-        PlanetGravity nearest = null;
-        float bestDist = float.MaxValue;
+        if (instance == null || instance.activePlanets.Count == 0) return null;
 
-        foreach (var p in _planets)
+        PlanetGravity bestPlanet = null;
+        float closestDistance = float.MaxValue;
+
+        foreach (PlanetGravity planet in instance.activePlanets)
         {
-            float dist = Vector3.Distance(playerPos, p.transform.position);
-            if (dist < bestDist)
+            if (planet.IsPositionInField(playerPosition))
             {
-                bestDist = dist;
-                nearest = p;
+                float distance = Vector3.Distance(playerPosition, planet.transform.position);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    bestPlanet = planet;
+                }
             }
         }
 
-        return nearest;
+        // Fallback: If player flies out into deep outer space, default to the closest planet anyway
+        if (bestPlanet == null)
+        {
+            float absoluteClosest = float.MaxValue;
+            foreach (PlanetGravity planet in instance.activePlanets)
+            {
+                float dist = Vector3.Distance(playerPosition, planet.transform.position);
+                if (dist < absoluteClosest)
+                {
+                    absoluteClosest = dist;
+                    bestPlanet = planet;
+                }
+            }
+        }
+
+        return bestPlanet;
     }
 }
