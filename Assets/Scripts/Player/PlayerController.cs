@@ -53,6 +53,10 @@ public class PlayerController : MonoBehaviour
     private bool isSprinting;
     private bool jumpRequested;
 
+    // UN-STICKY JUMP VARIABLES
+    private float jumpLockoutTimer = 0f;
+    private const float JumpLockoutDuration = 0.12f; // Time in seconds ground raycast sleeps after takeoff
+
     // Cache the current heading vector to smoothly maintain direction when inputs cease
     private Vector3 currentHeadingForward;
 
@@ -101,6 +105,12 @@ public class PlayerController : MonoBehaviour
 
         Vector3 gravityDir = planet.GetGravityDirection(transform.position);
 
+        // Track our jump lockout timer down to zero
+        if (jumpLockoutTimer > 0f)
+        {
+            jumpLockoutTimer -= Time.fixedDeltaTime;
+        }
+
         // 1. Resolve Surface Normal (Safe multi-sampling mesh check)
         surfaceNormal = SurfaceNormalResolver.ResolveSurfaceNormal(
             transform.position,
@@ -112,15 +122,10 @@ public class PlayerController : MonoBehaviour
             transform
         );
 
-        // ---------------------------------------------------------------------
-        // 2 & 3. DYNAMIC GRAVITY FIELD BLENDING (The Hard Snap Fix)
-        // ---------------------------------------------------------------------
+        // 2 & 3. DYNAMIC GRAVITY FIELD BLENDING
         Vector3 coreUp = -gravityDir;
         Vector3 targetPlayerUp = Vector3.Slerp(coreUp, surfaceNormal, 0.3f).normalized;
 
-        // If grounded, conform to gravity quickly to keep physics rock-solid.
-        // If mid-air (jumping between worlds), drop the blend speed down to 4f.
-        // This lets the player and the Cinemachine Orbital view glide smoothly into the new horizon profile!
         float activeGravitySmooth = grounded ? rotationSmooth : midAirGravitySmooth;
         playerUp = Vector3.Slerp(playerUp, targetPlayerUp, activeGravitySmooth * Time.fixedDeltaTime).normalized;
 
@@ -128,34 +133,30 @@ public class PlayerController : MonoBehaviour
         Quaternion currentRotationWithoutYaw = Quaternion.FromToRotation(transform.up, playerUp) * transform.rotation;
         transform.rotation = Quaternion.Slerp(transform.rotation, currentRotationWithoutYaw, rotationSmooth * Time.fixedDeltaTime);
 
-
-        // ---------------------------------------------------------------------
         // 4. PURE VIEWPORT SCREEN COORDINATE MATRIX
-        // ---------------------------------------------------------------------
         Vector3 camRightAxis = cameraTransform.right;
-
-        // Project the screen's absolute horizontal right vector flat onto Mario's planet tangent plane
         Vector3 cleanPlaneRight = Vector3.ProjectOnPlane(camRightAxis, playerUp).normalized;
-
-        // Derive forward by rotating your screen-space Right vector exactly 90 degrees counter-clockwise along playerUp.
         Vector3 cleanPlaneForward = Quaternion.AngleAxis(-90f, playerUp) * cleanPlaneRight;
 
         if (cleanPlaneForward.sqrMagnitude < 0.01f) cleanPlaneForward = transform.forward;
         if (cleanPlaneRight.sqrMagnitude < 0.01f) cleanPlaneRight = transform.right;
 
-        // Synthesize screen space stick inputs directly onto the curved planet coordinates
         Vector3 moveDir = (cleanPlaneForward * inputVector.y + cleanPlaneRight * inputVector.x).normalized;
 
+        // 5. PRECISE DETECTIVE GROUND CHECKING (With Polar Lockout Integration)
+        if (jumpLockoutTimer <= 0f)
+        {
+            Vector3 rayOrigin = transform.position + playerUp * (capsule.height * 0.5f);
+            float totalRayLength = (capsule.height * 0.5f) + groundSnapDistance;
+            grounded = Physics.Raycast(rayOrigin, -playerUp, out RaycastHit groundHit, totalRayLength, collisionMask);
+        }
+        else
+        {
+            // Force character airborne status while the rocket takeoff cooldown is running
+            grounded = false;
+        }
 
-        // 5. PRECISE DETECTIVE GROUND CHECKING (Fired from capsule center)
-        Vector3 rayOrigin = transform.position + playerUp * (capsule.height * 0.5f);
-        float totalRayLength = (capsule.height * 0.5f) + groundSnapDistance;
-        grounded = Physics.Raycast(rayOrigin, -playerUp, out RaycastHit groundHit, totalRayLength, collisionMask);
-
-
-        // ---------------------------------------------------------------------
         // 6. GROUNDING AND JUMP FORCES PIPELINE
-        // ---------------------------------------------------------------------
         if (grounded)
         {
             coyoteCounter = coyoteTime;
@@ -163,9 +164,10 @@ public class PlayerController : MonoBehaviour
 
             if (jumpRequested)
             {
-                verticalVel = jumpSpeed; // Directly load the vertical launch velocity vector
+                verticalVel = jumpSpeed;
                 grounded = false;
                 coyoteCounter = 0f;
+                jumpLockoutTimer = JumpLockoutDuration; // Initialize the grounding lockout timer
             }
             else
             {
@@ -185,32 +187,33 @@ public class PlayerController : MonoBehaviour
         // Reset read state
         jumpRequested = false;
 
-
-        // ---------------------------------------------------------------------
         // 7. Rigidbody Movement Velocity Translation
-        // ---------------------------------------------------------------------
         float targetSpeed = isSprinting ? sprintSpeed : moveSpeed;
         Vector3 targetHorizontalVelocity = moveDir * (inputVector.magnitude * targetSpeed);
 
         // Slide perfectly along slopes and curvatures
         if (grounded)
         {
-            targetHorizontalVelocity = Vector3.ProjectOnPlane(targetHorizontalVelocity, groundHit.normal).normalized * targetHorizontalVelocity.magnitude;
+            // Find the active surface normal via raycast hit context data
+            Vector3 hitNormal = -gravityDir;
+            Vector3 checkOrigin = transform.position + playerUp * (capsule.height * 0.5f);
+            float totalRayLength = (capsule.height * 0.5f) + groundSnapDistance;
+            if (Physics.Raycast(checkOrigin, -playerUp, out RaycastHit slideHit, totalRayLength, collisionMask))
+            {
+                hitNormal = slideHit.normal;
+            }
+
+            targetHorizontalVelocity = Vector3.ProjectOnPlane(targetHorizontalVelocity, hitNormal).normalized * targetHorizontalVelocity.magnitude;
         }
 
         // Apply velocities cleanly to the physics engine
         rb.linearVelocity = targetHorizontalVelocity + (playerUp * verticalVel);
 
-
-        // ---------------------------------------------------------------------
         // 8. ABSOLUTE VIEWPORT MESH TURNING ENGINE
-        // ---------------------------------------------------------------------
         if (moveDir.sqrMagnitude > 0.01f)
         {
-            // Read your physical stick inputs as a raw, absolute 2D screen angle (-180 to 180 degrees)
             float joystickTargetAngle = Mathf.Atan2(inputVector.x, inputVector.y) * Mathf.Rad2Deg;
 
-            // Generate a flat look rotation relative to our stable horizontal screen tracking line
             Vector3 camProjectedForward = Vector3.ProjectOnPlane(cameraTransform.forward, playerUp).normalized;
             if (camProjectedForward.sqrMagnitude < 0.01f) camProjectedForward = transform.forward;
 
@@ -220,5 +223,4 @@ public class PlayerController : MonoBehaviour
             transform.rotation = Quaternion.Slerp(transform.rotation, targetHeadingRotation, rotationSmooth * Time.fixedDeltaTime);
         }
     }
-
 }
