@@ -1,6 +1,7 @@
-﻿using UnityEngine;
+﻿using Animancer;
+using Unity.Cinemachine;
+using UnityEngine;
 using UnityEngine.InputSystem;
-using Animancer;
 
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController : MonoBehaviour
@@ -21,15 +22,17 @@ public class PlayerController : MonoBehaviour
     [Header("Gravity")]
     public float gravityMultiplier = 1f;
     public float groundSnapDistance = 0.3f;
+    [Tooltip("How fast the camera/player leans into a new planet's gravity field when jumping between them.")]
+    public float midAirGravitySmooth = 4f;
 
     [Header("Input")]
     public InputActionReference moveAction;
     public InputActionReference jumpAction;
     public InputActionReference sprintAction;
 
-    [Header("Camera")]
+    [Header("Camera Engine")]
+    [Tooltip("Drag your Main Camera here. The script only needs ONE single camera reference to handle controls!")]
     public Transform cameraTransform;
-    public Transform cameraTarget;
 
     [Header("Animancer")]
     public AnimancerComponent animancer;
@@ -57,6 +60,11 @@ public class PlayerController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
 
+        // Set secure dynamic physics configurations
+        rb.useGravity = false;
+        rb.constraints = RigidbodyConstraints.FreezeRotation;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
         currentHeadingForward = transform.forward;
     }
 
@@ -69,14 +77,6 @@ public class PlayerController : MonoBehaviour
         if (jumpAction.action.triggered)
         {
             jumpRequested = true;
-        }
-
-        // Keep camera target tracked over frame cycles
-        PlanetGravity planet = GravityManager.GetNearestPlanet(transform.position);
-        if (planet != null)
-        {
-            Vector3 gravityDir = planet.GetGravityDirection(transform.position);
-            cameraTarget.up = -gravityDir;
         }
 
         // Drive animations based on grounded status
@@ -101,7 +101,7 @@ public class PlayerController : MonoBehaviour
 
         Vector3 gravityDir = planet.GetGravityDirection(transform.position);
 
-        // 1. Resolve Surface Normal (Safe multi-sampling)
+        // 1. Resolve Surface Normal (Safe multi-sampling mesh check)
         surfaceNormal = SurfaceNormalResolver.ResolveSurfaceNormal(
             transform.position,
             gravityDir,
@@ -112,102 +112,113 @@ public class PlayerController : MonoBehaviour
             transform
         );
 
-        // 2. Mario Galaxy Core-to-Normal Blending
+        // ---------------------------------------------------------------------
+        // 2 & 3. DYNAMIC GRAVITY FIELD BLENDING (The Hard Snap Fix)
+        // ---------------------------------------------------------------------
         Vector3 coreUp = -gravityDir;
         Vector3 targetPlayerUp = Vector3.Slerp(coreUp, surfaceNormal, 0.3f).normalized;
-        playerUp = Vector3.Slerp(playerUp, targetPlayerUp, 10f * Time.fixedDeltaTime).normalized;
 
-        // 3. Keep Player Oriented Upwards Relative to the Sphere
+        // If grounded, conform to gravity quickly to keep physics rock-solid.
+        // If mid-air (jumping between worlds), drop the blend speed down to 4f.
+        // This lets the player and the Cinemachine Orbital view glide smoothly into the new horizon profile!
+        float activeGravitySmooth = grounded ? rotationSmooth : midAirGravitySmooth;
+        playerUp = Vector3.Slerp(playerUp, targetPlayerUp, activeGravitySmooth * Time.fixedDeltaTime).normalized;
+
+        // Apply the smoothed planetary alignment orientation to the capsule root
         Quaternion currentRotationWithoutYaw = Quaternion.FromToRotation(transform.up, playerUp) * transform.rotation;
         transform.rotation = Quaternion.Slerp(transform.rotation, currentRotationWithoutYaw, rotationSmooth * Time.fixedDeltaTime);
 
 
         // ---------------------------------------------------------------------
-        // 4. POLAR-SAFE SCREEN COORDINATE MATRIX (The South Pole Fix)
+        // 4. PURE VIEWPORT SCREEN COORDINATE MATRIX
         // ---------------------------------------------------------------------
-        // We use your cameraTarget tracking frame, keeping your Cinemachine setup working.
-        Vector3 targetRight = cameraTarget.right;
-        Vector3 targetForward = cameraTarget.forward;
+        Vector3 camRightAxis = cameraTransform.right;
 
-        // Flatten the right vector onto the player's current standing planet tangent plane
-        Vector3 cleanPlaneRight = Vector3.ProjectOnPlane(targetRight, playerUp).normalized;
+        // Project the screen's absolute horizontal right vector flat onto Mario's planet tangent plane
+        Vector3 cleanPlaneRight = Vector3.ProjectOnPlane(camRightAxis, playerUp).normalized;
 
-        // THE FIXED MATRICES: Instead of a cross product (which collapses to zero length at the poles),
-        // we use a Quaternion to rotate the clean horizontal right vector by 90 degrees along the playerUp axis.
-        // This is mathematically guaranteed never to suffer from gimbal lock or division-by-zero spinning!
-        Vector3 cleanPlaneForward = Quaternion.AngleAxis(90f, playerUp) * cleanPlaneRight;
+        // Derive forward by rotating your screen-space Right vector exactly 90 degrees counter-clockwise along playerUp.
+        Vector3 cleanPlaneForward = Quaternion.AngleAxis(-90f, playerUp) * cleanPlaneRight;
 
-        // Ensure direction consistency: If the generated forward vector mirrors backwards 
-        // relative to the camera view, flip it back instantly.
-        if (Vector3.Dot(cleanPlaneForward, targetForward) < 0f)
-        {
-            cleanPlaneForward = -cleanPlaneForward;
-        }
-
-        // Secure fallbacks if variables calculate near zero
         if (cleanPlaneForward.sqrMagnitude < 0.01f) cleanPlaneForward = transform.forward;
         if (cleanPlaneRight.sqrMagnitude < 0.01f) cleanPlaneRight = transform.right;
 
-        // Synthesize screen space stick inputs directly onto the curved mesh coordinates
+        // Synthesize screen space stick inputs directly onto the curved planet coordinates
         Vector3 moveDir = (cleanPlaneForward * inputVector.y + cleanPlaneRight * inputVector.x).normalized;
 
 
-        // ---------------------------------------------------------------------
-        // 5. LOOK DIRECTION HANDLING (Yaw Decoupled)
-        // ---------------------------------------------------------------------
-        if (moveDir.sqrMagnitude > 0.01f)
-        {
-            currentHeadingForward = moveDir;
-        }
-        else
-        {
-            currentHeadingForward = Vector3.ProjectOnPlane(currentHeadingForward, playerUp).normalized;
-        }
-
-        Quaternion targetHeadingRotation = Quaternion.LookRotation(currentHeadingForward, playerUp);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetHeadingRotation, rotationSmooth * Time.fixedDeltaTime);
-
-
-        // ---------------------------------------------------------------------
-        // 6 & 7. Ground Checking and Jumping
-        // ---------------------------------------------------------------------
+        // 5. PRECISE DETECTIVE GROUND CHECKING (Fired from capsule center)
         Vector3 rayOrigin = transform.position + playerUp * (capsule.height * 0.5f);
         float totalRayLength = (capsule.height * 0.5f) + groundSnapDistance;
         grounded = Physics.Raycast(rayOrigin, -playerUp, out RaycastHit groundHit, totalRayLength, collisionMask);
 
+
+        // ---------------------------------------------------------------------
+        // 6. GROUNDING AND JUMP FORCES PIPELINE
+        // ---------------------------------------------------------------------
         if (grounded)
         {
             coyoteCounter = coyoteTime;
             rb.AddForce(gravityDir * planet.gravityStrength * gravityMultiplier, ForceMode.Acceleration);
 
-            if (jumpRequested && coyoteCounter > 0f)
+            if (jumpRequested)
             {
-                rb.linearVelocity = Vector3.ProjectOnPlane(rb.linearVelocity, playerUp) + (playerUp * jumpSpeed);
+                verticalVel = jumpSpeed; // Directly load the vertical launch velocity vector
                 grounded = false;
                 coyoteCounter = 0f;
+            }
+            else
+            {
+                verticalVel = -1f; // Clamps the capsule cleanly to the planet surface while moving
             }
         }
         else
         {
             coyoteCounter -= Time.fixedDeltaTime;
             rb.AddForce(gravityDir * planet.gravityStrength * gravityMultiplier, ForceMode.Acceleration);
+
+            // Extract current vertical velocity components relative to playerUp while falling
+            verticalVel = Vector3.Dot(rb.linearVelocity, playerUp);
+            verticalVel -= planet.gravityStrength * gravityMultiplier * Time.fixedDeltaTime;
         }
+
+        // Reset read state
         jumpRequested = false;
 
 
         // ---------------------------------------------------------------------
-        // 8. Rigidbody Movement Velocity Translation
+        // 7. Rigidbody Movement Velocity Translation
         // ---------------------------------------------------------------------
         float targetSpeed = isSprinting ? sprintSpeed : moveSpeed;
         Vector3 targetHorizontalVelocity = moveDir * (inputVector.magnitude * targetSpeed);
 
-        // Maintain falling/jumping momentum cleanly along the current playerUp axis
-        Vector3 currentVerticalVelocity = Vector3.Project(rb.linearVelocity, playerUp);
-        rb.linearVelocity = targetHorizontalVelocity + currentVerticalVelocity;
+        // Slide perfectly along slopes and curvatures
+        if (grounded)
+        {
+            targetHorizontalVelocity = Vector3.ProjectOnPlane(targetHorizontalVelocity, groundHit.normal).normalized * targetHorizontalVelocity.magnitude;
+        }
 
-        // Synchronize your camera target tracker flatly to the planet up direction.
-        cameraTarget.up = playerUp;
+        // Apply velocities cleanly to the physics engine
+        rb.linearVelocity = targetHorizontalVelocity + (playerUp * verticalVel);
+
+
+        // ---------------------------------------------------------------------
+        // 8. ABSOLUTE VIEWPORT MESH TURNING ENGINE
+        // ---------------------------------------------------------------------
+        if (moveDir.sqrMagnitude > 0.01f)
+        {
+            // Read your physical stick inputs as a raw, absolute 2D screen angle (-180 to 180 degrees)
+            float joystickTargetAngle = Mathf.Atan2(inputVector.x, inputVector.y) * Mathf.Rad2Deg;
+
+            // Generate a flat look rotation relative to our stable horizontal screen tracking line
+            Vector3 camProjectedForward = Vector3.ProjectOnPlane(cameraTransform.forward, playerUp).normalized;
+            if (camProjectedForward.sqrMagnitude < 0.01f) camProjectedForward = transform.forward;
+
+            Quaternion cameraPlanarRotation = Quaternion.LookRotation(camProjectedForward, playerUp);
+            Quaternion targetHeadingRotation = cameraPlanarRotation * Quaternion.AngleAxis(joystickTargetAngle, Vector3.up);
+
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetHeadingRotation, rotationSmooth * Time.fixedDeltaTime);
+        }
     }
-
 
 }
