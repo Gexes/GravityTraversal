@@ -53,6 +53,9 @@ public class PlayerController : MonoBehaviour
     private Vector2 inputVector;
     private bool isSprinting;
     private bool jumpRequested;
+    private bool sprintToggleState = false;
+    private bool wasSprintPressedThisFrame = false;
+
 
     // Un-sticky jump variables
     private float jumpLockoutTimer = 0f;
@@ -75,14 +78,29 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        // Gather input values every frame smoothly
+        // Gather joystick inputs smoothly
         inputVector = moveAction.action.ReadValue<Vector2>();
-        isSprinting = sprintAction.action.ReadValue<float>() > 0.5f;
 
-        if (jumpAction.action.triggered)
+        // 1. READ THE TOGGLE PRESS TRIGGER
+        // Read the interaction trigger on the exact frame it registers down
+        bool isSprintPressedNow = sprintAction.action.ReadValue<float>() > 0.5f;
+
+        if (isSprintPressedNow && !wasSprintPressedThisFrame)
         {
-            jumpRequested = true;
+            // Flip the state back and forth on every distinct tap
+            sprintToggleState = !sprintToggleState;
         }
+        wasSprintPressedThisFrame = isSprintPressedNow;
+
+        // 2. AUTOMATIC SPRINT DROPOUT
+        // If the player lets go of the joystick entirely, reset back to a normal walk state
+        if (inputVector.sqrMagnitude < 0.01f)
+        {
+            sprintToggleState = false;
+        }
+
+        // Cache the final speed decision to pass down into your FixedUpdate movement loop
+        isSprinting = sprintToggleState;
 
         // Drive animations based on grounded status
         if (!grounded)
@@ -98,6 +116,7 @@ public class PlayerController : MonoBehaviour
             animancer.Play(idleClip, 0.2f);
         }
     }
+
 
     void FixedUpdate()
     {
