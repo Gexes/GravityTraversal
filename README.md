@@ -1,6 +1,6 @@
 # GravityTraversal
 
-A professional-grade Unity 6 framework for planetary traversal featuring dynamic gravity, spherical world movement, surface-aligned character orientation, custom camera systems, and launch mechanics for seamless navigation between planets.
+A intermediate-grade Unity 6 framework for planetary traversal featuring dynamic gravity, spherical world movement, surface-aligned character orientation, custom camera systems, and launch mechanics for seamless navigation between planets.
 
 ## Features
 
