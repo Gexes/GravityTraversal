@@ -6296,7 +6296,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 1
   moveSpeed: 4
-  sprintSpeed: 8
+  sprintSpeed: 7
   rotationSmooth: 8
   jumpSpeed: 10
   coyoteTime: 0.15
